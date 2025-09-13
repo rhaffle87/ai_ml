@@ -10,11 +10,8 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 import screen_brightness_control as sbc
 import pythoncom
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
 
-# Inisialisasi COM
+# Inisialisasi COM untuk Pycaw
 pythoncom.CoInitialize()
 
 # ==== Audio Setup (PyCaw) ====
@@ -59,6 +56,13 @@ class HandGestureController(VideoTransformerBase):
         sbc.set_brightness(brightness)
         self.brightness_level = brightness
         return self.brightness_level
+
+    def reset_calibration(self):
+        """Reset ulang kalibrasi"""
+        self.calibrating = True
+        self.frame_count = 0
+        self.vol_distances = []
+        self.bright_distances = []
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
@@ -123,15 +127,36 @@ with col1:
 
 with col2:
     st.subheader("📊 Real-Time Stats")
-    volume_placeholder = st.metric("🔊 Volume", "0%")
-    brightness_placeholder = st.metric("💡 Brightness", "0%")
+
+    if "volume_history" not in st.session_state:
+        st.session_state["volume_history"] = []
+    if "brightness_history" not in st.session_state:
+        st.session_state["brightness_history"] = []
 
     if ctx.video_transformer:
         stats = ctx.video_transformer
-        st.write("Calibration:", "⏳ Ongoing" if stats.calibrating else "✅ Done")
 
-        # Update metrics secara real-time
-        volume_placeholder.metric("🔊 Volume", f"{stats.volume_level}%")
-        brightness_placeholder.metric("💡 Brightness", f"{stats.brightness_level}%")
+        st.metric("🔊 Volume", f"{stats.volume_level}%")
+        st.metric("💡 Brightness", f"{stats.brightness_level}%")
+
+        st.write("Calibration:", "⏳ Ongoing" if stats.calibrating else "✅ Done")
         st.write(f"Volume Range: {stats.vol_min:.1f} - {stats.vol_max:.1f}")
         st.write(f"Brightness Range: {stats.bright_min:.1f} - {stats.bright_max:.1f}")
+
+        # Tambahkan history untuk grafik
+        if not stats.calibrating:
+            st.session_state["volume_history"].append(stats.volume_level)
+            st.session_state["brightness_history"].append(stats.brightness_level)
+
+        # Grafik Line Chart
+        st.line_chart({
+            "Volume": st.session_state["volume_history"],
+            "Brightness": st.session_state["brightness_history"]
+        })
+
+        # Tombol Recalibrate
+        if st.button("🔄 Recalibrate"):
+            stats.reset_calibration()
+            st.session_state["volume_history"] = []
+            st.session_state["brightness_history"] = []
+            st.warning("Recalibration started... move your fingers naturally!")
