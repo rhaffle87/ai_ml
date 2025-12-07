@@ -112,6 +112,7 @@ self.onmessage = function(e) {
       const slaveOffsetSec = sMeters[si].offsetSec || 0;
       const pairConstSec = (slaveClockOffset + slaveOffsetSec) - (masterClockOffset + masterOffsetSec);
       let idx = 0;
+      let nanCount = 0;
       for (let j=0;j<nyv;j++){
         const y = gridBounds.minY + j*dy;
         for (let i=0;i<nxv;i++, idx++){
@@ -125,12 +126,19 @@ self.onmessage = function(e) {
           else if (sMeters[si].asfMeters !== undefined) asfS = sMeters[si].asfMeters || 0;
 
           // compute arrival seconds using local geometry and provided ASF per-point
-          const distM = (mMeters[mi].lat !== undefined && mMeters[mi].lng !== undefined) ? haversineMeters({lat:mMeters[mi].lat,lng:mMeters[mi].lng}, {x,y}) : Math.hypot(mMeters[mi].x - x, mMeters[mi].y - y);
-          const distS = (sMeters[si].lat !== undefined && sMeters[si].lng !== undefined) ? haversineMeters({lat:sMeters[si].lat,lng:sMeters[si].lng}, {x,y}) : Math.hypot(sMeters[si].x - x, sMeters[si].y - y);
+          // prefer Euclidean distances in meter coordinates (x/y) — do not mix lat/lng with meter points
+          const distM = (mMeters[mi].x !== undefined && mMeters[mi].y !== undefined) ? Math.hypot(mMeters[mi].x - x, mMeters[mi].y - y) : ((mMeters[mi].lat !== undefined && mMeters[mi].lng !== undefined) ? haversineMeters({lat:mMeters[mi].lat,lng:mMeters[mi].lng}, {lat:x, lng:y}) : 0);
+          const distS = (sMeters[si].x !== undefined && sMeters[si].y !== undefined) ? Math.hypot(sMeters[si].x - x, sMeters[si].y - y) : ((sMeters[si].lat !== undefined && sMeters[si].lng !== undefined) ? haversineMeters({lat:sMeters[si].lat,lng:sMeters[si].lng}, {lat:x, lng:y}) : 0);
           const arrivalM = (distM / C) + (mMeters[mi].offsetSec || 0) + simulateClockTick(mMeters[mi].clock || {biasSec:0,driftPerSec:0}, simTimeSec) + (asfM - (mMeters[mi].diffCorrections && mMeters[mi].diffCorrections.enabled ? (mMeters[mi].diffCorrections.avgMeters||0) : 0)) / C;
           const arrivalS = (distS / C) + (sMeters[si].offsetSec || 0) + simulateClockTick(sMeters[si].clock || {biasSec:0,driftPerSec:0}, simTimeSec) + (asfS - (sMeters[si].diffCorrections && sMeters[si].diffCorrections.enabled ? (sMeters[si].diffCorrections.avgMeters||0) : 0)) / C;
           // remove pair constant clock/offset so contours are based on geometric + ASF/diff variations
-          grid[idx] = (arrivalS - arrivalM) - pairConstSec; // seconds
+          const val = (arrivalS - arrivalM) - pairConstSec; // seconds
+          if (!isFinite(val) || Number.isNaN(val)) {
+            nanCount++;
+            grid[idx] = 0; // safe fallback
+          } else {
+            grid[idx] = val;
+          }
         }
       }
       // marching squares on grid to get zero-contour polylines in meter coords
@@ -139,7 +147,7 @@ self.onmessage = function(e) {
       for (const ln of msLines) {
         contours.push({ masterIndex: mi, slaveIndex: si, points: ln, levelSeconds: 0 });
       }
-      maps.push({ masterIndex: mi, slaveIndex: si, nx: nxv, ny: nyv, gridBuffer: grid.buffer });
+      maps.push({ masterIndex: mi, slaveIndex: si, nx: nxv, ny: nyv, gridBuffer: grid.buffer, nanCount });
     }
   }
 

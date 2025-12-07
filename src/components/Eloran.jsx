@@ -1,15 +1,17 @@
-// src/components/e-Loran.jsx
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import proj4 from "proj4";
 import Papa from "papaparse";
+import Modal from './Modal';
+import simplifyRDP from '../utils/simplify';
+import Waveforms from './Waveforms';
 
 /*
-  e-Loran Simulator component
-  - Built as an extended version of the uploaded Loran-C simulator (see original Loranc.jsx). 
+  Eloran Simulator component
+  - Built as an extended version of the uploaded Loran-C simulator (see original Loranc.jsx).
   - Adds: DDS emulation, clock types & timing discipline, differential corrections, integrity checks,
-          ASF dynamic modeling hooks, GNSS-eLoran fusion toggle.
+          ASF dynamic modeling hooks, GNSS-Eloran fusion toggle.
   - Intended for engineering / classroom / industrial modelling use.
 */
 
@@ -109,7 +111,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
 
-  // stations: masters (with additional e-Loran fields), slaves, receivers
+  // stations: masters (with additional Eloran fields), slaves, receivers
   const [masters, setMasters] = useState([]); // {lat,lng, txDbm, gri, label, clock: {type,biasSec,driftPerSec}, ddsEnabled, asfMap, diffCorrections}
   const [slaves, setSlaves] = useState([]); // similar to Loran-C slaves
   const [receivers, setReceivers] = useState([]); // {lat,lng,label, fuseMode: 'eLoran'|'GNSS'|'fusion'}
@@ -131,6 +133,12 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
   const simTimeRef = useRef(0);
   const [asfText, setAsfText] = useState('return 0;');
   const [asfTarget, setAsfTarget] = useState('');
+  const [contourSimplifyToleranceMeters, setContourSimplifyToleranceMeters] = useState(8);
+  const [samplerConcurrency, setSamplerConcurrency] = useState(3);
+  // modal state for non-blocking prompt/confirm
+  const [modalState, setModalState] = useState({ open: false, type: 'info', title: '', message: '' });
+  const [modalInput, setModalInput] = useState('');
+  const modalResolveRef = useRef(null);
   const [contourUnit, setContourUnit] = useState('meters'); // 'meters' or 'seconds'
   const asfWorkerRef = useRef(null);
   const [estimatorMode, setEstimatorMode] = useState('controlled'); // 'controlled'|'random'|'none'
@@ -146,6 +154,36 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
       }
     } catch (e) {}
   }, []);
+
+  // show a prompt modal, returns Promise<string|null>
+  function showPrompt(title, defaultValue='') {
+    return new Promise((resolve) => {
+      modalResolveRef.current = resolve;
+      setModalInput(defaultValue);
+      setModalState({ open: true, type: 'prompt', title, message: '' });
+    });
+  }
+
+  // show a confirm modal, returns Promise<boolean>
+  function showConfirm(message, title='Confirm') {
+    return new Promise((resolve) => {
+      modalResolveRef.current = resolve;
+      setModalInput('');
+      setModalState({ open: true, type: 'confirm', title, message });
+    });
+  }
+
+  function handleModalCancel() {
+    try { if (modalResolveRef.current) modalResolveRef.current(modalState.type === 'prompt' ? null : false); } catch(e) {}
+    modalResolveRef.current = null;
+    setModalState({ open: false, type: 'info', title: '', message: '' });
+  }
+
+  function handleModalConfirm(val) {
+    try { if (modalResolveRef.current) modalResolveRef.current(modalState.type === 'prompt' ? val : true); } catch(e) {}
+    modalResolveRef.current = null;
+    setModalState({ open: false, type: 'info', title: '', message: '' });
+  }
   const [detectJitterMs, setDetectJitterMs] = useState(1);
   const [skyEnabled, setSkyEnabled] = useState(false);
   const [skyDelayMs, setSkyDelayMs] = useState(1);
@@ -205,7 +243,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
 
   useEffect(()=> { modeRef.current = mode; }, [mode]);
 
-  // marker adders: reuse style but with e-Loran badges
+  // marker adders: reuse style but with Eloran badges
   const addMarker = useCallback((point, label, type, meta={}) => {
     if (!mapRef.current) return;
     const el = document.createElement('div');
@@ -270,7 +308,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
       txDbm: 20,
       gri: 8330,
       label,
-      // default e-Loran additions
+      // default Eloran additions
       clock: { type: 'gps-disciplined', biasSec: 0, driftPerSec: 0 },
       ddsEnabled: true,
       asfMap: null, // user-editable
@@ -296,7 +334,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
     addMarker(point, label, 'receiver');
   }, [addMarker]);
 
-  // CSV import (extended to accept e-Loran fields if present)
+  // CSV import (extended to accept Eloran fields if present)
   const handleCsvImport = useCallback((event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -360,7 +398,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
     event.target.value = '';
   }, [addMarker]);
 
-  // --- e-Loran core: compute TDOA grid like Loran-C but apply ASF + diff corrections and DDS timing ---
+  // --- Eloran core: compute TDOA grid like Loran-C but apply ASF + diff corrections and DDS timing ---
   async function computeGrid(nx=200, ny=200) {
     if (masters.length === 0 || slaves.length === 0) { showToast('Add at least one master and one slave', 'error'); return; }
     // prepare grid bounds from station extents (EPSG:3857)
@@ -418,13 +456,8 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
     // if any master has a function asfMap, pre-sample it into rasters so the grid worker never needs to eval functions
     const hasFunctionAsf = masters.some(m => m.asfMap && typeof m.asfMap === 'function');
 
-    // helper to sample rasters for a function-based ASF using asfWorker
-    async function sampleAsfRastersForMasters(masterList) {
-      if (!asfWorkerRef.current) {
-        asfWorkerRef.current = new Worker(new URL('../workers/asfWorker.js', import.meta.url), { type: 'module' });
-      }
-      const aw = asfWorkerRef.current;
-
+    // helper to sample rasters for a function-based ASF using multiple short-lived workers (bounded concurrency)
+    async function sampleAsfRastersForMasters(masterList, concurrency = 3) {
       // prepare lat/lng arrays for every grid cell (cell centers) — reuse for all masters
       const nxv = nx, nyv = ny;
       const dx = (gridBounds.maxX - gridBounds.minX) / (nxv - 1);
@@ -442,41 +475,76 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
       }
 
       const rasters = Array(masterList.length).fill(null);
-
-      // sample each master sequentially (single worker instance)
+      const tasks = [];
       for (let mi = 0; mi < masterList.length; mi++) {
         const m = masterList[mi];
         if (!m.asfMap || typeof m.asfMap !== 'function') continue;
         const code = 'return (' + m.asfMap.toString() + ')(lat,lng);';
-        // await single sampleBatch call
-        const result = await new Promise((resolve, reject) => {
+        tasks.push({ mi, code });
+      }
+
+      if (tasks.length === 0) return rasters;
+
+      // concurrency-limited runner
+      let nextTask = 0;
+      async function runTask(task) {
+        const { mi, code } = task;
+        return new Promise((resolve) => {
+          const w = new Worker(new URL('../workers/asfWorker.js', import.meta.url), { type: 'module' });
+          const tid = setTimeout(() => {
+            try { w.terminate(); } catch(e) {}
+            console.warn('ASF sampling timeout for master index', mi);
+            resolve({ mi, arr: null });
+          }, 12000);
           const onmsg = (ev) => {
             const mm = ev.data;
             if (!mm) return;
             if (mm.type === 'result' && mm.payload && mm.payload.buffer) {
-              aw.removeEventListener('message', onmsg);
+              clearTimeout(tid);
+              w.removeEventListener('message', onmsg);
               const arr = new Float32Array(mm.payload.buffer);
-              resolve(arr);
+              try { w.terminate(); } catch(e) {}
+              resolve({ mi, arr });
             } else if (mm.type === 'error') {
-              aw.removeEventListener('message', onmsg);
-              reject(new Error(mm.payload && mm.payload.message ? mm.payload.message : 'ASF sampling error'));
+              clearTimeout(tid);
+              w.removeEventListener('message', onmsg);
+              try { w.terminate(); } catch(e) {}
+              console.warn('ASF sampling error for master', mi, mm.payload && mm.payload.message);
+              resolve({ mi, arr: null });
             }
           };
-          aw.addEventListener('message', onmsg);
-          // send lat/lng arrays (do NOT transfer them so they can be reused)
+          w.addEventListener('message', onmsg);
           try {
-            aw.postMessage({ type: 'sampleBatch', payload: { code, lats: latArr, lngs: lngArr, nx: nxv, ny: nyv } });
+            w.postMessage({ type: 'sampleBatch', payload: { code, lats: latArr, lngs: lngArr, nx: nxv, ny: nyv } });
           } catch (err) {
-            aw.removeEventListener('message', onmsg);
-            reject(err);
+            clearTimeout(tid);
+            w.removeEventListener('message', onmsg);
+            try { w.terminate(); } catch(e) {}
+            console.warn('ASF sampling postMessage failed for master', mi, err);
+            resolve({ mi, arr: null });
           }
-          // timeout
-          setTimeout(() => { aw.removeEventListener('message', onmsg); reject(new Error('ASF sampling timeout')); }, 10000);
-        }).catch((err) => {
-          console.warn('ASF sampling failed for master', m.label, err);
-          return null;
         });
-        rasters[mi] = result; // may be null on failure
+      }
+
+      // worker pool loop
+      const results = [];
+      const runners = [];
+      const concurrencyLimit = Math.max(1, Math.min(concurrency, tasks.length));
+      for (let i = 0; i < concurrencyLimit; i++) {
+        runners.push((async function workerLoop() {
+          while (nextTask < tasks.length) {
+            const task = tasks[nextTask++];
+            // eslint-disable-next-line no-await-in-loop
+            const res = await runTask(task);
+            results.push(res);
+          }
+        })());
+      }
+      await Promise.all(runners);
+
+      // populate rasters by master index
+      for (const r of results) {
+        rasters[r.mi] = r.arr;
       }
       return rasters;
     }
@@ -497,6 +565,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
               const mapsConverted = maps.map(m => ({ masterIndex: m.masterIndex, slaveIndex: m.slaveIndex, nx: m.nx, ny: m.ny, gridBounds: gb, data: new Float32Array(m.gridBuffer), units: 'seconds' }));
               gridMapsRef.current = mapsConverted;
               setGridStatus({ status: 'ready', computedAt: Date.now(), mapsCount: mapsConverted.length, contours, gridBounds: gb, gridUnits: 'seconds' });
+              showToast(`Grid computed: ${mapsConverted.length} maps, ${contours.length} contours`, 'success', 3000);
               drawLOPs(contours);
           }
       };
@@ -504,7 +573,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
       // if function ASFs exist, pre-sample them into rasters and include them in payload
       let asfRasters = null;
       if (hasFunctionAsf) {
-        const ras = await sampleAsfRastersForMasters(mMeters);
+        const ras = await sampleAsfRastersForMasters(mMeters, samplerConcurrency);
         // convert to ArrayBuffer list (null where not present)
         asfRasters = ras.map(a => a ? a.buffer : null);
       }
@@ -587,34 +656,46 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
   // draw LOPs (similar to Loranc.jsx)
   function drawLOPs(contours) {
     if (!mapRef.current) return;
-    if (mapRef.current.getLayer('elops')) mapRef.current.removeLayer('elops');
-    if (mapRef.current.getSource('elops')) mapRef.current.removeSource('elops');
-    const features = contours.map((contour, idx) => {
-      const coords = contour.points.map(([x,y]) => proj4('EPSG:3857','EPSG:4326',[x,y]));
-      const levelSeconds = typeof contour.levelSeconds !== 'undefined' ? contour.levelSeconds : 0;
-      const levelMeters = levelSeconds * C.c;
-      return {
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: coords },
-        properties: {
-          id: `elop-${contour.masterIndex}-${contour.slaveIndex}-${idx}`,
-          masterIndex: contour.masterIndex,
-          slaveIndex: contour.slaveIndex,
-          levelSeconds,
-          levelMeters
+    try {
+      if (mapRef.current.getLayer('elops')) mapRef.current.removeLayer('elops');
+      if (mapRef.current.getSource('elops')) mapRef.current.removeSource('elops');
+    } catch(e) { /* ignore */ }
+
+    const features = [];
+    (contours || []).forEach((contour, idx) => {
+      try {
+        let pts = contour.points || [];
+        if (contourSimplifyToleranceMeters && contourSimplifyToleranceMeters > 0) {
+          try { pts = simplifyRDP(pts, contourSimplifyToleranceMeters); } catch(e) { pts = contour.points || []; }
         }
-      };
+        if (!pts || pts.length < 2) return; // need at least two points for LineString
+        const coords = pts.map(([x,y]) => proj4('EPSG:3857','EPSG:4326',[x,y]));
+        if (!coords || coords.length < 2) return;
+        const levelSeconds = typeof contour.levelSeconds !== 'undefined' ? contour.levelSeconds : 0;
+        const levelMeters = levelSeconds * C.c;
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: coords },
+          properties: { id: `elop-${contour.masterIndex}-${contour.slaveIndex}-${idx}`, masterIndex: contour.masterIndex, slaveIndex: contour.slaveIndex, levelSeconds, levelMeters }
+        });
+      } catch (err) {
+        console.warn('Failed to process contour', err);
+      }
     });
 
-    if (features.length === 0) return;
+    if (features.length === 0) {
+      showToast('No contours generated (check grid resolution / ASF sampling)', 'error', 4000);
+      return;
+    }
     const geojson = { type: 'FeatureCollection', features };
-    mapRef.current.addSource('elops', { type: 'geojson', data: geojson });
-    mapRef.current.addLayer({
-      id: 'elops',
-      type: 'line',
-      source: 'elops',
-      paint: { 'line-width': 2, 'line-opacity': 0.9, 'line-color': '#06b6d4' }
-    });
+    try {
+      mapRef.current.addSource('elops', { type: 'geojson', data: geojson });
+      mapRef.current.addLayer({ id: 'elops', type: 'line', source: 'elops', paint: { 'line-width': 2, 'line-opacity': 0.9, 'line-color': '#06b6d4' } });
+    } catch (err) {
+      console.error('Failed to add elops source/layer', err);
+      showToast('Failed to render contours: ' + (err && err.message ? err.message : String(err)), 'error', 5000);
+      return;
+    }
     // generate label features at centroid of each contour
     if (mapRef.current.getLayer('elop-labels')) mapRef.current.removeLayer('elop-labels');
     if (mapRef.current.getSource('elop-labels')) mapRef.current.removeSource('elop-labels');
@@ -710,7 +791,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
       const latOffset = (gnssErrorMeters / 111320) * 0.0; // no random lateral bias
       const lngOffset = (gnssErrorMeters / (111320 * Math.cos(rx.lat * Math.PI/180))) * 0.0;
       const gnssFix = { lat: rx.lat + latOffset, lng: rx.lng + lngOffset };
-      // weighted average: give e-Loran 0.6 weight when diffs present
+      // weighted average: give Eloran 0.6 weight when diffs present
       const wE = 0.6, wG = 0.4;
       fused = { lat: est.lat * wE + gnssFix.lat * wG, lng: est.lng * wE + gnssFix.lng * wG };
       // combine covariance simplistically: fusedCov = wE^2 * estCov + wG^2 * gnssCov
@@ -822,16 +903,20 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
         JTJ[1][0] += j2*j1; JTJ[1][1] += j2*j2;
         JTr[0] += j1 * r[i]; JTr[1] += j2 * r[i];
       }
-      const det = JTJ[0][0]*JTJ[1][1] - JTJ[0][1]*JTJ[1][0];
+      const det = JTJ[0][0] * JTJ[1][1] - JTJ[0][1] * JTJ[1][0];
       if (Math.abs(det) < 1e-12) break;
-      const inv = [[JTJ[1][1]/det, -JTJ[0][1]/det], [-JTJ[1][0]/det, JTJ[0][0]/det]];
-      const dx = inv[0][0]*JTr[0] + inv[0][1]*JTr[1];
-      const dy = inv[1][0]*JTr[0] + inv[1][1]*JTr[1];
-      x0 += dx; y0 += dy;
-      if (Math.hypot(dx,dy) < 1e-6) break;
-      JTJ_final = JTJ;
-      r_final = r.slice();
-    }
+      const inv = [
+        [JTJ[1][1] / det, -JTJ[0][1] / det],
+        [-JTJ[1][0] / det, JTJ[0][0] / det]
+      ];
+      const dx = inv[0][0] * JTr[0] + inv[0][1] * JTr[1];
+      const dy = inv[1][0] * JTr[0] + inv[1][1] * JTr[1];
+      x0 += dx;
+      y0 += dy;
+  if (Math.hypot(dx, dy) < 1e-6) break;
+  JTJ_final = JTJ;
+  r_final = r.slice();
+}
     const R = 6371000;
     const lat = (y0 / R) * 180 / Math.PI;
     const lng = (x0 / (R * Math.cos(refLat * Math.PI / 180))) * 180 / Math.PI;
@@ -862,6 +947,8 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
   // pulse simulation (reuse with small augmentation: attach DDS events and timing offsets)
   function simulatePulsesAtReceivers() {
     if (masters.length === 0 || slaves.length === 0 || receivers.length === 0) { showToast('Add masters, slaves, and receivers', 'error'); return; }
+    // if a RNG seed is set in UI, apply it so simulation is repeatable
+    try { if (rngSeed) setRngSeed(parseInt(rngSeed)); } catch(e) {}
     const sampleRate = 1000000;
     const pulseDuration = 0.0001;
     const totalDuration = 0.01;
@@ -935,7 +1022,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
           waveform[i] += amplitude * pulseShape;
         }
       });
-      return { receiver: r.label, arrivals, waveform, sampleRate };
+      return { receiver: r.label, arrivals, waveform, sampleRate, simStart: simTimeRef.current, totalDuration };
     });
     setSimulationResults(results);
     // broadcast DDS messages at current simulation time
@@ -1031,20 +1118,20 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
   }
 
   // small UI for station editing (clock/diff)
-  function editMasterConfig(label) {
+  async function editMasterConfig(label) {
     const m = masters.find(x => x.label === label);
     if (!m) return;
-    const newBias = prompt("Clock bias in seconds (positive means station clock ahead of UTC):", String(m.clock?.biasSec || 0));
-    const newDrift = prompt("Clock drift (seconds per second):", String(m.clock?.driftPerSec || 0));
-    const diffAvg = prompt("Differential correction average (meters, positive = subtract from error):", String((m.diffCorrections && m.diffCorrections.avgMeters) || 0));
-    const ddsEn = confirm("Enable DDS for this master? OK=yes, Cancel=no");
-    const griMs = prompt("GRI (ms) for transmitted pulses (e.g. 1000):", String(m.griMs || 1000));
-    const phaseSec = prompt("Pulse phase offset (sec):", String(m.phaseSec || 0));
-    setMasters(prev => prev.map(st => st.label === label ? { ...st, clock: { type: st.clock?.type || 'gps-disciplined', biasSec: parseFloat(newBias)||0, driftPerSec: parseFloat(newDrift)||0 }, diffCorrections: { enabled: true, avgMeters: parseFloat(diffAvg)||0 }, ddsEnabled: ddsEn, griMs: parseInt(griMs)||1000, phaseSec: parseFloat(phaseSec)||0 } : st));
+    const newBias = await showPrompt("Clock bias in seconds (positive means station clock ahead of UTC):", String(m.clock?.biasSec || 0));
+    const newDrift = await showPrompt("Clock drift (seconds per second):", String(m.clock?.driftPerSec || 0));
+    const diffAvg = await showPrompt("Differential correction average (meters, positive = subtract from error):", String((m.diffCorrections && m.diffCorrections.avgMeters) || 0));
+    const ddsEn = await showConfirm("Enable DDS for this master? OK=yes, Cancel=no");
+    const griMs = await showPrompt("GRI (ms) for transmitted pulses (e.g. 1000):", String(m.griMs || 1000));
+    const phaseSec = await showPrompt("Pulse phase offset (sec):", String(m.phaseSec || 0));
+    setMasters(prev => prev.map(st => st.label === label ? { ...st, clock: { type: st.clock?.type || 'gps-disciplined', biasSec: parseFloat(newBias)||0, driftPerSec: parseFloat(newDrift)||0 }, diffCorrections: { enabled: true, avgMeters: parseFloat(diffAvg)||0 }, ddsEnabled: !!ddsEn, griMs: parseInt(griMs)||1000, phaseSec: parseFloat(phaseSec)||0 } : st));
   }
 
   // ASF assignment helpers (minimal UI-driven evaluator)
-  function applyAsfToMaster() {
+  async function applyAsfToMaster() {
     if (!asfTarget) { showToast('Select a master to apply ASF to', 'error'); return; }
     const code = asfText || 'return 0;';
     // Basic blacklist to avoid obvious globals and network APIs
@@ -1075,18 +1162,20 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
         // timeout
         setTimeout(() => { aw.removeEventListener('message', onmsg); reject(new Error('ASF eval timeout')); }, 1200);
       });
-      res.then((val) => {
+      try {
+        const val = await res;
         if (typeof val !== 'number') {
-          if (!confirm('ASF worker returned non-number. Assign anyway?')) return;
+          const ok = await showConfirm('ASF worker returned non-number. Assign anyway?');
+          if (!ok) return;
         }
         // create main-thread function for per-cell performance
         let fn;
         try { fn = createAsfFunctionFromText(code); } catch (e) { showToast('Error creating ASF function: '+e.message, 'error'); return; }
         setMasters(prev => prev.map(m => m.label === asfTarget ? { ...m, asfMap: fn } : m));
         showToast(`ASF assigned to ${asfTarget} (validated in worker)`, 'success', 4000);
-      }).catch((err) => {
+      } catch (err) {
         showToast('ASF validation failed: ' + (err.message || String(err)), 'error', 6000);
-      });
+      }
       return;
     } catch (e) {
       // fallback
@@ -1094,7 +1183,8 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
         const fn = createAsfFunctionFromText(code);
         const test = fn(masters[0]?.lat || 0, masters[0]?.lng || 0);
         if (typeof test !== 'number') {
-          if (!confirm('ASF function did not return a number on test call. Continue anyway?')) return;
+          const ok = await showConfirm('ASF function did not return a number on test call. Continue anyway?');
+          if (!ok) return;
         }
         setMasters(prev => prev.map(m => m.label === asfTarget ? { ...m, asfMap: fn } : m));
         showToast(`ASF assigned to ${asfTarget}`, 'success', 4000);
@@ -1149,8 +1239,9 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
           </div>
         ))}
       </div>
+      <Modal open={modalState.open} type={modalState.type} title={modalState.title} message={modalState.message} value={modalInput} onChange={setModalInput} onConfirm={handleModalConfirm} onCancel={handleModalCancel} />
       <div className="px-3 py-2 bg-white border-b flex items-center gap-4">
-        <h2 className="text-lg font-semibold">e-Loran Simulator</h2>
+      <h2 className="text-lg font-semibold">Eloran Simulator</h2>
         <div className="flex gap-2">
           <button onClick={() => setMode('add-master')} className={`px-2 py-1 rounded transition-transform duration-150 hover:shadow-md hover:scale-105 ${mode==='add-master' ? 'bg-sky-600 text-white' : 'bg-gray-100'}`}>Add Masters</button>
           <button onClick={() => setMode('add-slave')} className={`px-2 py-1 rounded transition-transform duration-150 hover:shadow-md hover:scale-105 ${mode==='add-slave' ? 'bg-yellow-500 text-white' : 'bg-gray-100'}`}>Add Slaves</button>
@@ -1175,18 +1266,19 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
 
         <aside className="w-1/4 bg-white border-l p-3 overflow-auto">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold">e-Loran Controls & Status</h3>
+            <h3 className="font-semibold">Eloran Controls & Status</h3>
             <div className="text-xs text-gray-600 flex items-center gap-2">
               <div title="Active RNG seed">Seed: <span className="font-medium">{rngSeed || '—'}</span></div>
               <button onClick={()=>{ try { navigator.clipboard.writeText(String(rngSeed || '')); showToast('Seed copied', 'success', 1500); } catch(e){ showToast('Clipboard not available','error',1500); } }} className="text-xs px-2 py-0.5 rounded bg-gray-100">Copy</button>
             </div>
           </div>
           <div className="mt-2 text-xs">
-            <div>Sim time: {timeSinceStart}s</div>
-            <label className="block mt-2"><input type="checkbox" checked={enableDDSGlobal} onChange={(e)=>setEnableDDSGlobal(e.target.checked)} /> Global DDS enabled</label>
-            <label className="block mt-1"><input type="checkbox" checked={enableIntegrityChecks} onChange={(e)=>setEnableIntegrityChecks(e.target.checked)} /> Integrity checks</label>
-            <div className="mt-1">Integrity threshold (m): <input type="number" value={integrityThresholdMeters} onChange={(e)=>setIntegrityThresholdMeters(parseFloat(e.target.value)||0)} style={{width:80}} /></div>
-          </div>
+              <div>Sim time: {timeSinceStart}s</div>
+              <label className="block mt-2"><input type="checkbox" checked={enableDDSGlobal} onChange={(e)=>setEnableDDSGlobal(e.target.checked)} /> Global DDS enabled</label>
+              <label className="block mt-1"><input type="checkbox" checked={enableIntegrityChecks} onChange={(e)=>setEnableIntegrityChecks(e.target.checked)} /> Integrity checks</label>
+              <div className="mt-1">Integrity threshold (m): <input type="number" value={integrityThresholdMeters} onChange={(e)=>setIntegrityThresholdMeters(parseFloat(e.target.value)||0)} style={{width:80}} /></div>
+              <div className="mt-1">Contour simplify (m): <input type="number" min="0" step="1" value={contourSimplifyToleranceMeters} onChange={(e)=>setContourSimplifyToleranceMeters(parseFloat(e.target.value)||0)} style={{width:80}} /></div>
+            </div>
 
           <div className="mt-4">
             <div className="flex items-center justify-between">
@@ -1247,7 +1339,7 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
                     <div className="flex gap-1">
                       <button onClick={()=>estimateReceiver(idx)} className="text-xs px-2 py-0.5 rounded bg-indigo-100 transition-transform duration-150 hover:shadow-md hover:scale-105">Est</button>
                       <select value={r.fuseMode} onChange={(e)=> setReceivers(prev => prev.map(x => x.label===r.label ? {...x, fuseMode: e.target.value} : x)) } className="text-xs">
-                        <option value="eLoran">e-Loran</option>
+                        <option value="Eloran">Eloran</option>
                         <option value="GNSS">GNSS</option>
                         <option value="fusion">Fusion</option>
                       </select>
@@ -1350,6 +1442,11 @@ export default function ELoranSimulator({ tileUrlTemplate = TILE_URL_TEMPLATE })
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Waveforms viewer: shows combined receiver waveform and arrival markers */}
+          <div className="mt-4">
+            <Waveforms simulationResults={simulationResults} masters={masters} slaves={slaves} receivers={receivers} />
           </div>
 
           <div className="mt-4 text-xs">

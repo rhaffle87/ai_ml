@@ -1,0 +1,27 @@
+.wf-panel { padding: 8px; border-top: 1px solid #eee; }
+.wf-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.wf-title { font-weight:600; font-size:14px; }
+.wf-empty { font-size:12px; color:#666; padding:8px 0; }
+.wf-select { font-size:12px; padding:4px 6px; }
+.wf-legend { display:flex; gap:8px; margin-top:6px; align-items:center; }
+.wf-legend-item { font-size:12px; display:flex; align-items:center; gap:6px; color:#444; }
+.wf-dot { width:10px; height:10px; display:inline-block; border-radius:2px; }
+.wf-dot.master { background:#1e90ff; }
+.wf-dot.slave { background:#f59e0b; }
+.wf-plot { margin-top:8px; height:110px; }
+.wf-info { margin-top:6px; color:#666; }
+
+.wf-rows { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+.wf-row { display:flex; gap:8px; align-items:center; }
+.wf-row-label { width:72px; font-size:12px; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wf-row svg { flex:1; border-radius:4px; background:transparent; display:block; }
+.wf-row .tx { fill:#22c55e }
+.wf-amp { margin-left:6px; color:#777; font-size:11px; }
+
+.wf-plot { margin-top:8px; margin-bottom:8px; }
+.wf-plot svg { display:block; height:84px; }
+
+.wf-overlay-controls { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.wf-overlay-item { font-size:12px; display:flex; gap:6px; align-items:center; color:#333; }
+.wf-overlay-swatch { width:12px; height:12px; display:inline-block; border-radius:2px; margin-left:6px; margin-right:4px; }
+
