@@ -1,71 +1,108 @@
-# AI/ML Interactive Web Applications
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rhaffle87/actife/main/src/assets/logo.png" width="200">
+</p>
 
-A comprehensive interactive web application showcasing various AI/ML algorithms and concepts, built with React, Vite, and Tailwind CSS. This project demonstrates implementations of neural networks, linear regression, image processing, computer vision, signal processing, color science, and more through an intuitive web interface.
+<h1 align="center">Actife</h1>
 
-## 🚀 Features
+<p align="center">
+Interactive AI, Machine Learning, and Computational Science Playground
+</p>
 
-### Neural Networks
-- Interactive neural network visualization with PyTorch
-- Training visualization with loss curves and decision boundaries
-- Customizable network architecture (3-5-5-1 layers)
-- Real-time prediction on test data
+---
 
-### Linear Regression
-- Multi-dimensional linear regression implementations
-- 2D, 3D, and 4D visualization
-- BMKG weather data integration
-- Logistic regression for classification
+## Overview
 
-### Image Processing
-- Hierarchical JPEG compression with DCT transforms
-- Interactive quality control
-- Progressive decoding visualization
-- Real-time image processing
+**Actife** is an interactive web platform designed to explore and visualize concepts in **Artificial Intelligence, Machine Learning, Computer Vision, Signal Processing, and Computational Imaging**.
 
-### Computer Vision (MediaPipe)
+Built with **React, Vite, and Tailwind CSS**, the platform provides hands-on demonstrations and real-time visualizations that help users understand complex algorithms through interactive simulations.
+
+The project serves as an **educational and experimental environment** for exploring AI/ML techniques through visual tools and real-time interaction.
+
+---
+
+# Features
+
+## Neural Networks
+- Interactive neural network visualization using **PyTorch**
+- Real-time training visualization
+- Loss curve and decision boundary display
+- Customizable network architecture (3-5-5-1)
+
+## Linear Regression
+- Multi-dimensional regression demonstrations
+- 2D, 3D, and 4D regression visualization
+- Weather dataset integration (BMKG)
+- Logistic regression classification examples
+
+## Image Processing
+- Hierarchical **JPEG compression** simulation
+- Discrete Cosine Transform (DCT) visualization
+- Progressive image decoding
+- Interactive compression quality control
+
+## Computer Vision (MediaPipe)
+- Real-time **hand landmark detection**
 - Hand gesture recognition
-- Hand landmark detection
-- Object detection
+- Object detection demonstrations
 - Image classification
-- Real-time camera integration
+- Camera-based real-time interaction
 
-### Machine Learning
-- Comprehensive ML algorithm demonstrations
-- Interactive model training and evaluation
-- Performance metrics visualization
+## Machine Learning Algorithms
+- Interactive ML algorithm demonstrations
+- Model training visualization
+- Performance metric analysis
 
-### Signal Processing
-- Fourier transforms and analysis
-- Signal filtering techniques
-- Real-time signal processing demos
+## Signal Processing
+- Fourier transform demonstrations
+- Signal spectrum analysis
+- Digital filtering simulations
+- Real-time signal visualization
 
-### Color Science
-- Color space conversions (RGB, CMY, SMPTE, etc.)
-- Color theory demonstrations
+## Color Science
+- Color space transformations:
+  - RGB
+  - CMY
+  - SMPTE
+- Color theory exploration
 - Interactive color manipulation tools
 
-### Loran-C
-- Loran-C navigation system simulation
-- Signal propagation modeling
-- Positioning accuracy demonstrations
+## Loran-C Navigation Simulation
+- Loran-C radio navigation system model
+- Signal propagation visualization
+- Positioning accuracy demonstration
 
-### Tutorials
-- Step-by-step guides for AI/ML concepts
-- Interactive learning modules
-- Code examples and explanations
+## Tutorials
+- Step-by-step explanations of AI/ML concepts
+- Educational modules with code demonstrations
+- Interactive visual learning
 
-### Additional Algorithms
-- Discrete Cosine Transform (DCT) implementations
-- Quantization algorithms
-- Wavelet transformations
+---
 
-## 🛠️ Tech Stack
+# Technology Stack
 
-- **Frontend**: React 19, Vite, Tailwind CSS
-- **Backend/ML**: Python, PyTorch, TensorFlow, OpenCV
-- **Computer Vision**: MediaPipe
-- **Visualization**: Chart.js, Matplotlib, Plotly
-- **Build Tools**: Vite, ESLint
+### Frontend
+- React 19
+- Vite
+- Tailwind CSS
+
+### AI / Machine Learning
+- Python
+- PyTorch
+- TensorFlow
+- OpenCV
+
+### Computer Vision
+- MediaPipe
+
+### Visualization
+- Chart.js
+- Matplotlib
+- Plotly
+
+### Tooling
+- Vite
+- ESLint
+- Node.js
 
 ## 📁 Project Structure
 
@@ -109,8 +146,8 @@ ai_ml/
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd ai_ml
+   git clone https://github.com/rhaffle87/actife.git
+   cd actife
    ```
 
 2. **Install Node.js dependencies**
