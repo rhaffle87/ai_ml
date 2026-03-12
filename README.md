@@ -2,8 +2,6 @@
   <img src="https://raw.githubusercontent.com/rhaffle87/actife/main/src/assets/logo.png" width="200">
 </p>
 
-<h1 align="center">Actife</h1>
-
 <p align="center">
 Interactive AI, Machine Learning, and Computational Science Playground
 </p>
